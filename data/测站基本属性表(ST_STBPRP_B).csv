@@ -1,0 +1,3 @@
+测站编码,测站名称,河流名称,水系名称,流域名称,经度,纬度,站址,行政区划码,基面名称,基面高程,基面修正值,站类,报汛等级,建站年月,始报年月,隶属行业单位,信息管理单位,交换管理单位,测站岸别,测站方位,至河口距离,集水面积,拼音码,启用标志,备注,时间戳
+STCD,STNM,RVNM,HNNM,BSNM,LGTD,LTTD,STLC,ADDVCD,DTMNM,DTMEL,DTPR,STTP,FRGRD,ESSTYM,BGFRYM,ATCUNIT,ADMAUTH,LOCALITY,STBK,STAZT,DSTRVM,DRNA,PHCD,USFL,COMMENTS,MODITIME
+70140937,黎阳,率水,新安江,钱塘江,118.266667,29.716667,黄山市屯溪区黎阳镇黎阳,341002,NULL,0,NULL,SS,3,NULL,NULL,黄山水文,黄山水文,安徽水文,NULL,NULL,NULL,0,NULL,NULL,NULL,2019/7/12 11:30:58
