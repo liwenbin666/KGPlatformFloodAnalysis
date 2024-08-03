@@ -2,11 +2,21 @@ import json
 import numpy as np
 from flask import Blueprint, request, jsonify
 from applications.common.slice import SliceFlood
+from applications.exception.my_exception import APIException
 from datetime import datetime
 from pandas import Timestamp
 from applications.configuration.JsonConfig import NpEncoder
 
 bp = Blueprint('slice', __name__, url_prefix='/slice')
+
+
+def make_response(data=None, message="Success", code=200):
+    return jsonify({
+        "code": code,
+        "message": message,
+        "data": data
+    }), code
+
 
 def convert_numpy(data):
     """
@@ -26,6 +36,7 @@ def convert_numpy(data):
         return data.strftime("%Y-%m-%d %H:%M:%S")
     else:
         return data
+
 
 def convert_dates(data):
     """
@@ -48,31 +59,40 @@ def convert_dates(data):
 
     return data
 
+
 @bp.route("/sliceFlood", methods=['POST'])
 def Slice():
-    data = json.loads(request.data)
+    try:
+        data = json.loads(request.data)
 
-    stationId = data['stationId']
-    stationId = int(stationId)
+        stationId = data['stationId']
+        stationId = int(stationId)
 
-    startTime = data['startTime']
-    endTime = data['endTime']
+        startTime = data['startTime']
+        endTime = data['endTime']
 
-    height = data['height']
-    height = int(height)
+        height = data['height']
+        height = int(height)
 
-    distance = data['distance']
-    distance = int(distance)
+        distance = data['distance']
+        distance = int(distance)
 
-    sf = SliceFlood(stationId, startTime, endTime, height, distance)
-    slice_res = sf.slice_flood()
-    print("结果数据：")
-    print(slice_res)
+        duration = data['duration']
+        duration = int(duration)
 
-    # 在返回之前，转换numpy类型为原生Python类型
-    converted_res = convert_numpy(slice_res)
+        sf = SliceFlood(stationId, startTime, endTime, height, distance, duration)
+        slice_res = sf.slice_flood()
+        print("结果数据：")
+        print(slice_res)
 
-    # 转换日期格式
-    converted_res = convert_dates(converted_res)
+        # 在返回之前，转换numpy类型为原生Python类型
+        converted_res = convert_numpy(slice_res)
 
-    return jsonify(converted_res)
+        # 转换日期格式
+        converted_res = convert_dates(converted_res)
+
+        return make_response(data=converted_res, message="成功获取分段数据", code=200)
+    except APIException as e:
+        return make_response(message=str(e), code=e.code)
+    except Exception as e:
+        return make_response(message="处理请求时出错: " + str(e), code=400)

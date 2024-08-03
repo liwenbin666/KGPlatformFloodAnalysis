@@ -4,17 +4,42 @@ import pandas as pd
 from datetime import datetime
 from applications.common.utils.database import DBUtils
 from applications.configuration.JsonConfig import NpEncoder
+from applications.common.utils.http_status_codes import HTTPStatusCodes
+from applications.exception.my_exception import APIException
 from dtw import dtw
 import logging
 
 class MdtwMatch():
     def __init__(self, floodId, weights):
         self.id = floodId
+        print("当前ID",self.id)
         self.res_id = None
         self.res_3_id = None
         self.weights = weights
         self.columns = ['FLOOD_ID', 'RAINFALL_VALUE', 'RAIN_TREND', 'AREAL_RAIN', 'MAX_INDEX',
-                        'RAIN_SUM', 'RAIN_MAX', 'MAX_GRID_RAINFALL', 'FLOW_VALUE', 'PEAK_FLOOD', 'TOTAL_FLOOD']
+                        'RAIN_SUM', 'GRID_RAIN_MAX', 'MAX_GRID_RAINFALL', 'FLOW_VALUE', 'PEAK_FLOOD', 'TOTAL_FLOOD']
+        conn = DBUtils()
+        # 查询流量特征是否存在
+        flow_feature_sql = f"""
+                                    SELECT *
+                                    FROM flood_flow_feature
+                                    WHERE flood_id = '{self.id}'
+                        """
+        flow_feature_data = conn.query(flow_feature_sql)
+        print("数据库中获取的数据是：")
+        print(flow_feature_data)
+        # 查询降雨特征是否存在
+        rain_feature_sql = f"""
+                                            SELECT *
+                                            FROM flood_rain_feature
+                                            WHERE flood_id = '{self.id}'
+                                """
+        rain_feature_data = conn.query(rain_feature_sql)
+        print("数据库中获取的数据是：")
+        print(rain_feature_data)
+        if flow_feature_data is None or rain_feature_data is None:
+            raise APIException(msg="请先进行特征提取再匹配！", code=HTTPStatusCodes.SERVICE_UNAVAILABLE)
+
         all_ids_sql = "select flood_id from flood_time_data group by flood_id;"
 
         sql = """
@@ -25,9 +50,9 @@ class MdtwMatch():
                     b.max_grid_rainfall, 
                     b.rain_sum 
                 FROM 
-                    flood_feature a
+                    flood_flow_feature a
                 INNER JOIN 
-                    rain_feature b 
+                    flood_rain_feature b 
                 ON 
                     a.flood_id = b.flood_id;
                 """
@@ -70,14 +95,14 @@ class MdtwMatch():
             data['RAIN_TREND'] = [[]] * data.shape[0]
             data['AREAL_RAIN'] = [[]] * data.shape[0]
             data['MAX_INDEX'] = [[]] * data.shape[0]
-            data['RAIN_MAX'] = [[]] * data.shape[0]
+            data['GRID_RAIN_MAX'] = [[]] * data.shape[0]
             data['FLOW_VALUE'] = [[]] * data.shape[0]
 
             print("ids", ids)
 
 
             for id in ids:
-                sql1 = f"select flood_id, time, rainfall_value, rain_trend, areal_rain, max_index, rain_max, flow_value from flood_time_data where flood_id = {id} order by time;"
+                sql1 = f"select flood_id, time, rainfall_value, rain_trend, areal_rain, max_index, grid_rain_max, flow_value from flood_time_data where flood_id = {id} order by time;"
                 time_data = conn.query(sql1)
                 if not time_data:
                     logging.warning(f"No time data found for flood ID {id}.")
@@ -87,7 +112,7 @@ class MdtwMatch():
                     logging.warning(f"No time data returned for flood ID {id}.")
                     continue
                 time_data.columns = ['FLOOD_ID', 'TIME', 'RAINFALL_VALUE', 'RAIN_TREND', 'AREAL_RAIN', 'MAX_INDEX',
-                                     'RAIN_MAX', 'FLOW_VALUE']
+                                     'GRID_RAIN_MAX', 'FLOW_VALUE']
                 row_indices = data.loc[data['FLOOD_ID'] == id].index
                 if row_indices.empty:
                     logging.warning(f"No matching row found for flood ID {id}.")
@@ -99,11 +124,11 @@ class MdtwMatch():
                 data.at[row_number, 'RAIN_TREND'] = time_data['RAIN_TREND'].values.tolist()
                 data.at[row_number, 'AREAL_RAIN'] = time_data['AREAL_RAIN'].values.tolist()
                 data.at[row_number, 'MAX_INDEX'] = time_data['MAX_INDEX'].values.tolist()
-                data.at[row_number, 'RAIN_MAX'] = time_data['RAIN_MAX'].values.tolist()
+                data.at[row_number, 'GRID_RAIN_MAX'] = time_data['GRID_RAIN_MAX'].values.tolist()
                 data.at[row_number, 'FLOW_VALUE'] = time_data['FLOW_VALUE'].values.tolist()
 
             self.data = data[
-                ['FLOOD_ID', 'RAINFALL_VALUE', 'RAIN_TREND', 'AREAL_RAIN', 'MAX_INDEX', 'RAIN_SUM', 'RAIN_MAX',
+                ['FLOOD_ID', 'RAINFALL_VALUE', 'RAIN_TREND', 'AREAL_RAIN', 'MAX_INDEX', 'RAIN_SUM', 'GRID_RAIN_MAX',
                  'MAX_GRID_RAINFALL', 'FLOW_VALUE', 'PEAK_FLOOD', 'TOTAL_FLOOD']]
             print("self.data:")
             print(self.data)
@@ -111,7 +136,6 @@ class MdtwMatch():
             logging.debug(f"self.data: {self.data}")
             self.data = self.data[self.data['RAIN_SUM'] != 0]
             self.data = self.data.reset_index(drop=True)
-            # self.data.to_csv('D:\postgraduate\新知识平台\data.csv', index=False, encoding='utf_8_sig')
             if self.data.empty:
                 logging.error("Data is empty after initialization.")
                 raise ValueError("Data is empty after initialization.")

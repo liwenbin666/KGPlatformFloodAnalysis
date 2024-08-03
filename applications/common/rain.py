@@ -7,6 +7,9 @@ import numpy as np
 import ast
 import os
 from applications.common.utils.database import DBUtils
+from applications.common.utils.resample import resample_time_series
+from applications.exception.my_exception import APIException
+from applications.common.utils.http_status_codes import HTTPStatusCodes
 from scipy import signal
 
 
@@ -18,6 +21,10 @@ class Rain():
         self.stationId = stationId
         self.startTime = startTime
         self.endTime = endTime
+        print("开始时间")
+        print(self.startTime)
+        print("结束时间")
+        print(self.endTime)
 
         # 数据库操作工具
         self.db_utils = DBUtils()
@@ -49,11 +56,35 @@ class Rain():
         self.gridRainfall = None
         self.dataPrePath = None  # 根据工作目录定位不同的相对路径
 
+        # 查询洪水事件是否存在
+        flood_event_sql = f"""
+                            SELECT *
+                            FROM flood_events
+                            WHERE flood_id = '{self.floodId}'
+                """
+        data = self.db_utils.query(flood_event_sql)
+        print("数据库中获取的数据是：")
+        print(data)
+        if data is None:
+            raise APIException(msg="洪水场次不存在！", code=HTTPStatusCodes.NOT_FOUND)
+        # 查询洪水事件是否存在
+        flow_feature_sql = f"""
+                            SELECT *
+                            FROM flood_flow_feature
+                            WHERE flood_id = '{self.floodId}'
+                        """
+        data = self.db_utils.query(flow_feature_sql)
+        print("数据库中获取的流量特征值数据是：")
+        print(data)
+        if data is None:
+            raise APIException(msg="计算雨量特征值之前必须先计算流量特征值！", code=HTTPStatusCodes.FORBIDDEN)
+
+
         # 在station表中读取所在流域id
         basin_sql = f"""
                 SELECT basin_id
                 FROM station
-                WHERE id >= %s
+                WHERE station_id >= %s
                 AND station_type = 0
                 """
 
@@ -62,7 +93,7 @@ class Rain():
                         SELECT time, station_id, rain_value
                         FROM rain_data
                         WHERE station_id IN (
-                            SELECT id
+                            SELECT station_id
                             FROM station
                             WHERE basin_id = %s
                             AND station_type = 1
@@ -74,7 +105,7 @@ class Rain():
         lon_lat_sql = f"""
                 SELECT longitude_range, latitude_range
                 FROM basin
-                where id = %s
+                where basin_id = %s
                 """
 
         try:
@@ -97,11 +128,104 @@ class Rain():
             ##########################
 
             self.data = self.db_utils.query(rainData_sql, (self.basinId, self.startTime, self.endTime))
+            print("数据查出的self.data")
+            print(self.data)
+
+            # # 将数据转换为 DataFrame
+            # data_frame = pd.DataFrame(self.data)
+            #
             # print("原始雨量数据:")
+            # print(data_frame)
+            # # 使用自定义函数进行时间序列的重采样
+            # resampled_data = resample_time_series(
+            #     data=data_frame,
+            #     index_column='time',
+            #     sample_rate='h',
+            #     fill_method='spline',
+            #     order=3
+            # )
+            #
+            # # 在重采样数据中恢复原始的 station_id
+            # original_station_ids = data_frame['station_id'].drop_duplicates().tolist()
+            # resampled_data['station_id'] = pd.Series(original_station_ids * (len(resampled_data) // len(original_station_ids)))
+            #
+            # # 将所有负值替换为0
+            # resampled_data['rain_value'] = resampled_data['rain_value'].clip(lower=0)
+            #
+            # # 将重采样后的 DataFrame 转换回原始的列表字典格式
+            # resampled_data_list = resampled_data.to_dict(orient='records')
+            #
+            # # 更新 self.data 或处理 resampled_data_list
+            # self.data = resampled_data_list
+            #
+            # # 打印重采样后的结果
+            # print("重采样后的数据:")
+            # print(self.data)
+            self.data_frame = pd.DataFrame(self.data)
+            print("self.data_frame")
+            print(self.data_frame)
+            try:
+                if not self.data_frame.empty:
+                    self.data_frame['time'] = pd.to_datetime(self.data_frame['time'])
+                    self.process_and_resample()
+
+            except Exception as e:
+                print("加载数据时出错: ", e)
+            self.data_frame['station_id'] = self.data_frame['station_id'].astype('int64')
+            print("处理后的self.data_frame")
+            pd.set_option('display.max_rows', None)  # 显示所有行
+            pd.set_option('display.max_columns', None)  # 显示所有列
+            pd.set_option('display.width', 1000)  # 增加每行的显示宽度，防止换行
+            print(self.data_frame)
+            self.new_data = self.data_frame.to_dict(orient='records')
+            print("self.new_data")
+            print(self.new_data)
+            # if not data_frame.empty:
+            #     grouped = data_frame.groupby('station_id')
+            #     for station_id, group in grouped:
+            #         time_diff = group['time'].diff().dt.total_seconds().abs().mode()[0]
+            #         if time_diff != 3600:
+            #             print(f"Station {station_id} - time interval is not 1 hour, needs resampling.")
+            #             # 使用自定义函数进行时间序列的重采样
+            #             resampled_data = resample_time_series(
+            #                 data=data_frame,
+            #                 index_column='time',
+            #                 sample_rate='h',
+            #                 fill_method='spline',
+            #                 order=3
+            #             )
+            #
+            #             # 在重采样数据中恢复原始的 station_id
+            #             original_station_ids = data_frame['station_id'].drop_duplicates().tolist()
+            #             resampled_data['station_id'] = pd.Series(
+            #                 original_station_ids * (len(resampled_data) // len(original_station_ids)))
+            #
+            #             # 将所有负值替换为0
+            #             resampled_data['rain_value'] = resampled_data['rain_value'].clip(lower=0)
+            #
+            #             # 将重采样后的 DataFrame 转换回原始的列表字典格式
+            #             resampled_data_list = resampled_data.to_dict(orient='records')
+            #
+            #             # 更新 self.data 或处理 resampled_data_list
+            #             self.data = resampled_data_list
+            #             group = self.resample_time_series(group)
+            #         else:
+            #             print(f"Station {station_id} - time interval is 1 hour, no resampling needed.")
+            #
+            #     # 组合所有处理后的数据回data_frame
+            #     data_frame = pd.concat([self.resample_time_series(group) if
+            #                             group['time'].diff().dt.total_seconds().abs().mode()[0] != 3600 else group for
+            #                             _, group in grouped])
+            # print("原始雨量数据:")
+            # print(data_frame)
+            #
+            #
+            # # 打印重采样后的结果
+            # print("重采样后的数据:")
             # print(self.data)
 
             # 获取唯一的时间戳和测站ID
-            timestamps = sorted(list(set(row['time'] for row in self.data)))
+            timestamps = sorted(list(set(row['time'] for row in self.new_data)))
             self.stations = sorted(list(set(row['station_id'] for row in self.data)))
             self.timeList = timestamps
 
@@ -113,7 +237,7 @@ class Rain():
             station_id_to_index = {station_id: index for index, station_id in enumerate(self.stations)}
 
             # 用测量值填充数组
-            for row in self.data:
+            for row in self.new_data:
                 time_index = timestamp_to_index[row['time']]
                 station_index = station_id_to_index[row['station_id']]
                 self.rainData[time_index][station_index] = row['rain_value']
@@ -164,6 +288,31 @@ class Rain():
                 print('dataPrePath', self.dataPrePath)
         except Exception as e:
             print("查询数据时出错: ", e)
+
+    def process_and_resample(self):
+        grouped = self.data_frame.groupby('station_id')
+        resampled_frames = []
+
+        for station_id, group in grouped:
+            time_diff = group['time'].diff().dt.total_seconds().abs().mode()[0]
+            if time_diff != 3600:
+                print(f"Station {station_id} - time interval is not 1 hour, needs resampling.")
+                # resampled_group = resample_time_series(group, self.startTime, self.startTime)
+                resampled_group = resample_time_series(
+                    data=group,
+                    index_column='time',  # 指定时间列的名称
+                    sample_rate='h',  # 采样率，每小时一次
+                    fill_method='spline',  # 填充方法，这里使用线性插值
+                    order=3,
+                    start_time=self.startTime,  # 重采样的开始时间
+                    end_time=self.endTime  # 重采样的结束时间
+                )
+            else:
+                resampled_group = group
+                print(f"Station {station_id} - time interval is 1 hour, no resampling needed.")
+            resampled_frames.append(resampled_group)
+
+        self.data_frame = pd.concat(resampled_frames)
 
     @staticmethod
     # 将度分秒的经纬度转为小数点形式
@@ -246,7 +395,7 @@ class Rain():
         # 生成流域中雨量站的经纬度信息
         # 从station表里读取洪水所在流域的雨量站信息
         station_sql = '''
-            SELECT id, longitude, latitude
+            SELECT station_id, longitude, latitude
             FROM station 
             WHERE basin_id = %s
             AND station_type = 1
@@ -260,7 +409,7 @@ class Rain():
 
             # 用查询结果填充 DataFrame
             if self.data:
-                data = [{"区站号": row['id'], "东经": row['longitude'], "北纬": row['latitude']} for row in self.data]
+                data = [{"区站号": row['station_id'], "东经": row['longitude'], "北纬": row['latitude']} for row in self.data]
                 df = pd.DataFrame(data)
                 print("生成的测站DataFrame：\n", df)  # 调试信息
 
@@ -453,50 +602,99 @@ class Rain():
         self.gridRainfall = GRID_RAINFALL_LIST
 
     def save_Rain_Feature(self):
-        print("特征值保存中")
-        # 对rain_feature表的保存
-        save_rain_feature_sql = '''
-                INSERT INTO rain_feature (
-                    flood_id, rain_sum, rainfall_state,
-                    rain_max_state, rain_trend_state,
-                    areal_rain_state, rain_center_state, rain_center_side_state,
-                    max_index_state, grid_rainfall_path, max_grid_rainfall
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            '''
-
-        # 对flood_time_data表的更新
-        update_time_data_sql = '''
-        UPDATE flood_time_data
-        SET 
-            rainfall_value = %s,
-            rain_max = %s,
-            rain_trend = %s,
-            areal_rain = %s,
-            rain_center = %s,
-            rain_center_side = %s,
-            max_index = %s
-        WHERE time = %s;
-        '''
-
         try:
-            # 对于rain_feature表
-            self.data = self.db_utils.exec(save_rain_feature_sql, (
-                self.floodId, int(self.rainSum), self.resultState['RAINFALL_STATE'],
-                self.resultState['RAIN_MAX_STATE'], self.resultState['RAIN_TREND_STATE'],
-                self.resultState['AREAL_RAIN_STATE'], self.resultState['RAIN_CENTER_STATE'],
-                self.resultState['RAIN_CENTER_SIDE_STATE'], self.resultState['MAX_INDEX_STATE'],
-                self.resultState['GRID_RAINFALL_STATE'], str(self.maxGridRainfall)
-            ))
+            # 检查原本记录是否存在，如果存在则执行update，否则执行insert操作
+            exist_sql = "SELECT * FROM flood_rain_feature WHERE flood_id = %s"
+            existing_data = self.db_utils.query(exist_sql, (self.floodId,))
+            print("数据库中获取的数据是：")
+            print(existing_data)
+            print("特征值保存中")
+            # 对rain_feature表的保存
+            # save_rain_feature_sql = '''
+            #         INSERT INTO flood_rain_feature (
+            #             flood_id, rain_sum, rainfall_state,
+            #             rain_max_state, rain_trend_state,
+            #             areal_rain_state, rain_center_state, rain_center_side_state,
+            #             max_index_state, grid_rainfall_state, max_grid_rainfall
+            #         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            #     '''
+            if existing_data:  # 如果存在记录，则执行更新操作
+                print("执行的是更新操作")
+                update_rain_feature_sql = '''
+                            UPDATE flood_rain_feature
+                            SET 
+                                rain_sum = %s,
+                                rainfall_state = %s,
+                                rain_max_state = %s,
+                                rain_trend_state = %s,
+                                areal_rain_state = %s,
+                                rain_center_state = %s,
+                                rain_center_side_state = %s,
+                                max_index_state = %s,
+                                grid_rainfall_state = %s,
+                                max_grid_rainfall = %s
+                            WHERE flood_id = %s
+                        '''
+                update_data = (
+                    int(self.rainSum),
+                    self.resultState['RAINFALL_STATE'],
+                    self.resultState['RAIN_MAX_STATE'],
+                    self.resultState['RAIN_TREND_STATE'],
+                    self.resultState['AREAL_RAIN_STATE'],
+                    self.resultState['RAIN_CENTER_STATE'],
+                    self.resultState['RAIN_CENTER_SIDE_STATE'],
+                    self.resultState['MAX_INDEX_STATE'],
+                    self.resultState['GRID_RAINFALL_STATE'],
+                    str(self.maxGridRainfall),
+                    self.floodId
+                )
+                self.db_utils.exec(update_rain_feature_sql, update_data)
+            else:  # 如果不存在记录，则执行插入操作
+                print("执行的是插入操作")
+                insert_rain_feature_sql = '''
+                            INSERT INTO flood_rain_feature (
+                                flood_id, rain_sum, rainfall_state,
+                                rain_max_state, rain_trend_state,
+                                areal_rain_state, rain_center_state, rain_center_side_state,
+                                max_index_state, grid_rainfall_state, max_grid_rainfall
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        '''
+                insert_data = (
+                    self.floodId,
+                    int(self.rainSum),
+                    self.resultState['RAINFALL_STATE'],
+                    self.resultState['RAIN_MAX_STATE'],
+                    self.resultState['RAIN_TREND_STATE'],
+                    self.resultState['AREAL_RAIN_STATE'],
+                    self.resultState['RAIN_CENTER_STATE'],
+                    self.resultState['RAIN_CENTER_SIDE_STATE'],
+                    self.resultState['MAX_INDEX_STATE'],
+                    self.resultState['GRID_RAINFALL_STATE'],
+                    str(self.maxGridRainfall)
+                )
+                self.db_utils.exec(insert_rain_feature_sql, insert_data)
 
-            # 对于flood_time_data表
+            # 对flood_time_data表的更新
+            update_time_data_sql = '''
+            UPDATE flood_time_data
+            SET 
+                rainfall_value = %s,
+                grid_rain_max = %s,
+                rain_trend = %s,
+                areal_rain = %s,
+                rain_center = %s,
+                rain_center_side = %s,
+                max_index = %s
+            WHERE time = %s;
+            '''
             for i in range(len(self.timeList)):
-                rainList = None if self.rainList is None else self.rainList[i]
-                rainMax = None if self.rainMax is None else self.rainMax[i]
-                rainTrend = None if self.rainTrend is None else self.rainTrend[i]
-                arealRain = None if self.arealRain is None else self.arealRain[i]
-                rainCenter = None if self.rainCenter is None else self.rainCenter[i]
-                rainCenterSide = None if self.rainCenterSide is None else self.rainCenterSide[i]
-                maxIndex = None if self.maxIndex is None else self.maxIndex[i]
+                rainList = self.rainList[i] if self.rainList else None
+                rainMax = self.rainMax[i] if self.rainMax else None
+                rainTrend = self.rainTrend[i] if self.rainTrend else None
+                arealRain = self.arealRain[i] if self.arealRain else None
+                rainCenter = self.rainCenter[i] if self.rainCenter else None
+                rainCenterSide = self.rainCenterSide[i] if self.rainCenterSide else None
+                maxIndex = self.maxIndex[i] if self.maxIndex else None
                 timeValue = self.timeList[i]
 
                 # 打印调试信息
@@ -512,19 +710,69 @@ class Rain():
                 if not isinstance(timeValue, str):
                     timeValue = timeValue.strftime('%Y-%m-%d %H:%M:%S')
 
-                params = (rainList, rainMax, rainTrend, arealRain,
-                          rainCenter, rainCenterSide, maxIndex, timeValue)
+                params = (
+                    rainList, rainMax, rainTrend, arealRain,
+                    rainCenter, rainCenterSide, maxIndex, timeValue
+                )
 
                 self.db_utils.exec(update_time_data_sql, params)
-
-            # self.db_utils.__del__()
-
         except Exception as e:
             import traceback
             error_message = str(e).replace('"', '*').replace("'", '*')
             traceback_message = traceback.format_exc().replace('"', '*').replace("'", '*')
             print(f"更新数据时出错: {error_message}")
             print(f"堆栈信息: {traceback_message}")
+
+        finally:
+            self.db_utils.__del__()
+
+        # try:
+        #     # 对于rain_feature表
+        #     self.data = self.db_utils.exec(save_rain_feature_sql, (
+        #         self.floodId, int(self.rainSum), self.resultState['RAINFALL_STATE'],
+        #         self.resultState['RAIN_MAX_STATE'], self.resultState['RAIN_TREND_STATE'],
+        #         self.resultState['AREAL_RAIN_STATE'], self.resultState['RAIN_CENTER_STATE'],
+        #         self.resultState['RAIN_CENTER_SIDE_STATE'], self.resultState['MAX_INDEX_STATE'],
+        #         self.resultState['GRID_RAINFALL_STATE'], str(self.maxGridRainfall)
+        #     ))
+        #
+        #     # 对于flood_time_data表
+        #     for i in range(len(self.timeList)):
+        #         rainList = None if self.rainList is None else self.rainList[i]
+        #         rainMax = None if self.rainMax is None else self.rainMax[i]
+        #         rainTrend = None if self.rainTrend is None else self.rainTrend[i]
+        #         arealRain = None if self.arealRain is None else self.arealRain[i]
+        #         rainCenter = None if self.rainCenter is None else self.rainCenter[i]
+        #         rainCenterSide = None if self.rainCenterSide is None else self.rainCenterSide[i]
+        #         maxIndex = None if self.maxIndex is None else self.maxIndex[i]
+        #         timeValue = self.timeList[i]
+        #
+        #         # 打印调试信息
+        #         print(f"Updating record for time: {timeValue}")
+        #         print(f"rainList: {rainList}, rainMax: {rainMax}, rainTrend: {rainTrend}, arealRain: {arealRain}")
+        #         print(f"rainCenter: {rainCenter}, rainCenterSide: {rainCenterSide}, maxIndex: {maxIndex}")
+        #
+        #         # 确保参数是单一值且格式正确
+        #         if isinstance(rainCenter, tuple):
+        #             rainCenter = ', '.join(map(str, rainCenter))
+        #         if isinstance(rainCenterSide, list):
+        #             rainCenterSide = ', '.join(rainCenterSide)
+        #         if not isinstance(timeValue, str):
+        #             timeValue = timeValue.strftime('%Y-%m-%d %H:%M:%S')
+        #
+        #         params = (rainList, rainMax, rainTrend, arealRain,
+        #                   rainCenter, rainCenterSide, maxIndex, timeValue)
+        #
+        #         self.db_utils.exec(update_time_data_sql, params)
+        #
+        #     # self.db_utils.__del__()
+        #
+        # except Exception as e:
+        #     import traceback
+        #     error_message = str(e).replace('"', '*').replace("'", '*')
+        #     traceback_message = traceback.format_exc().replace('"', '*').replace("'", '*')
+        #     print(f"更新数据时出错: {error_message}")
+        #     print(f"堆栈信息: {traceback_message}")
 
     def get_Rain_Feature(self):
 
@@ -544,11 +792,11 @@ class Rain():
         self.get_Rain_Trend()
         self.get_Grid_Rainfall()
         self.update_rain_coordinates()
-        print("rain_center:")
-        print(self.rainCenter)
-        print("Length of self.rainCenter:", len(self.rainCenter))
-        print("Length of self.rainCenterSide:", len(self.rainCenterSide))
-        print("Length of self.timeList:", len(self.timeList))
+        # print("rain_center:")
+        # print(self.rainCenter)
+        # print("Length of self.rainCenter:", len(self.rainCenter))
+        # print("Length of self.rainCenterSide:", len(self.rainCenterSide))
+        # print("Length of self.timeList:", len(self.timeList))
 
         # 收集特征值提取状态
         result_state = {}
@@ -596,6 +844,7 @@ def run_jar(jar_path):
     output, error = process.communicate()
 
     if process.returncode != 0:
+        raise APIException(msg="数据不足无法计算面雨量相关特征值",code=HTTPStatusCodes)
         print(f"Error occurred: {error}")
     else:
         print(f"Output: {output}")

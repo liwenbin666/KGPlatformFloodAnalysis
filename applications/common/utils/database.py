@@ -10,7 +10,7 @@ class DBUtils:
         self.db_port = 3306
         self.db_username = 'root'
         self.db_password = '111111'
-        self.db_name = 'flood'
+        self.db_name = 'flood_analysis'
 
         try:
             # 连接数据库
@@ -92,11 +92,14 @@ class DBUtils:
             # print(f"Executing SQL: {sql} with params: {params}")  # 添加调试信息
             self.cursor.execute(sql, params)
             self.conn.commit()
+            return self.cursor.lastrowid
         except pymysql.MySQLError as e:
             self.conn.rollback()
             print("MySQL 数据库执行存在问题: ", e)
+            return None
         except BaseException as e1:
             print("其他异常:", e1)
+            return None
 
     # def insert_and_get_id(self, sql, params=None):
     #     try:

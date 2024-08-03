@@ -3,11 +3,13 @@ import scipy.signal as signal
 from applications.exception.my_exception import APIException
 import datetime
 from applications.common.utils.database import DBUtils
+from applications.common.utils.resample import resample_time_series
+from applications.common.utils.http_status_codes import HTTPStatusCodes
 
 
 class SliceFlood():
 
-    def __init__(self, stationId, startTime, endTime, height, distance, duration=5):
+    def __init__(self, stationId, startTime, endTime, height, distance, duration):
 
         self.stationId = stationId
         self.basinId = None
@@ -35,79 +37,28 @@ class SliceFlood():
             data = self.db_utils.query(sql)
             data = pd.DataFrame(data)
             data.columns = ['Time', 'FlowValue']
-            self.data = data
-            self.data['Time'] = pd.to_datetime(self.data['Time'])
+            print("数据库中获取的数据是：")
+            print(data)
+            # 使用重采样函数
+            self.data = resample_time_series(data, index_column='Time', sample_rate='H', fill_method='spline', order=3)
+            print("resample_time_series后的数据")
+            print(self.data)
+            # self.data = data
+            # self.data['Time'] = pd.to_datetime(self.data['Time'])
         except Exception as e:
-            raise APIException(msg="数据库连接异常!")
+            raise APIException(msg="数据库连接异常!",code=HTTPStatusCodes.SERVICE_UNAVAILABLE)
 
-        print("数据库中获取的数据是：")
-        print(self.data)
-
-        basinId_sql = "SELECT basin_id FROM station WHERE id = %s"
-        result = self.db_utils.query(basinId_sql, (self.stationId,))
-        if result and 'basin_id' in result[0]:  # 确保结果不为空且含有'basin_id'键
-            self.basinId = result[0]['basin_id']
-            print("当前流域ID是：", self.basinId)
-        else:
-            self.basinId = None  # 如果没有结果或结果不合适，将basinId设为None
-            print("没有找到对应的流域ID")
-
-        # 使用 basinId 查询流域面积basin_area
-        if self.basinId is not None:
-            basinArea_sql = "SELECT basin_area FROM basin WHERE id = %s"
-            area_result = self.db_utils.query(basinArea_sql, (self.basinId,))
-            if area_result and 'basin_area' in area_result[0]:  # 确保结果不为空且含有'basin_area'键
-                self.basinArea = area_result[0]['basin_area']
-                print("当前流域面积为：", self.basinArea)
-            else:
-                self.basinArea = None  # 如果没有结果或结果不合适，将basinArea设为None
-                print("没有找到对应的流域面积")
-        else:
-            print("由于没有有效的流域ID，无法查询流域面积")
-
-        # 根据流域面积调整洪水持续时间 duration
-        if self.basinArea < 100:  # 小流域
-            self.duration = 1
-        elif 100 <= self.basinArea < 1000:  # 中小型流域
-            self.duration = 3
-        elif 1000 <= self.basinArea < 10000:  # 中型流域
-            self.duration = 5
-        elif self.basinArea >= 10000:  # 大型流域
-            self.duration = 7
-
-        print("当前设定的洪水持续时间duration为：")
-        print(self.duration)
-
-        flood_times_sql = "SELECT start_time, end_time, peak_time FROM flood_data WHERE station_id = %s"
-        flood_data = self.db_utils.query(flood_times_sql, (self.stationId,))
+        flood_times_sql = "SELECT start_time, end_time, peak_time FROM flood_events WHERE station_id = %s"
+        flood_event = self.db_utils.query(flood_times_sql, (self.stationId,))
         print("数据库中获取洪水事件的数据是：")
         print(self.data)
-        if flood_data:
-            for row in flood_data:
+        if flood_event:
+            for row in flood_event:
                 self.flood_times.append({
                     "start_date": row['start_time'],
                     "end_date": row['end_time'],
                     "peak_date": row['peak_time']
                 })
-
-        # # 指定CSV文件的路径
-        # csv_file_path = 'D:\postgraduate\project\PatternLibrary\data/response.csv'
-        # self.data = pd.read_csv(csv_file_path, header=0, names=['Time', 'FlowValue'])
-        # # print("csv文件里的数据是")
-        # # print(self.data)
-        #
-        # # 确保时间列是 datetime 类型
-        # self.data['Time'] = pd.to_datetime(self.data['Time'])
-
-        # csv_file_path = 'D:\postgraduate\project\PatternLibrary\data\\test.csv'
-        # self.data = pd.read_csv(csv_file_path, header=0, names=['tm', 'q'])
-        #
-        # list = self.data['FlowValue'].tolist()
-        # print("list里的数据是")
-        # print(list)
-        #
-        # print("csv文件里的数据是")
-        # print(self.data)
 
     def find_peak(self):
         flow = self.data['FlowValue'].tolist()
@@ -122,7 +73,7 @@ class SliceFlood():
         flow_smooth = signal.savgol_filter(flow, window_length, 4)
         peaks = signal.find_peaks(flow_smooth, height=self.height, distance=self.distance)
         if len(peaks[0]) == 0:
-            raise APIException("当前配置无法划分场次,请重新输入和划分相关的参数!")
+            raise APIException(msg="当前配置无法划分场次,请重新输入和划分相关的参数!",code=HTTPStatusCodes.SERVICE_UNAVAILABLE)
 
         print(peaks)
         return peaks[0]
@@ -175,20 +126,20 @@ class SliceFlood():
 
     def save_res_2_db(self):
         if self.slice_res is None:
-            raise APIException("划分场次出错，场次结果为0")
+            raise APIException(msg="划分场次出错，场次结果为0", code=HTTPStatusCodes.INTERNAL_SERVER_ERROR)
         if len(self.slice_res) == 0:
-            raise APIException("划分场次出错，场次结果存在重叠")
+            raise APIException(msg="划分场次出错，场次结果存在重叠",code=HTTPStatusCodes.FORBIDDEN)
 
         flood_ids = []
-        sql = "INSERT INTO flood_data (station_id, start_time, end_time, peak_time) VALUES (%s, %s, %s, %s)"
+        sql = "INSERT INTO flood_events (station_id, start_time, end_time, peak_time) VALUES (%s, %s, %s, %s)"
         for key, value in self.slice_res.items():
             station_id = self.stationId
             start_date = value['start_date']
             end_date = value['end_date']
             peak_date = value['peak_date']
 
-            flood_data = (station_id, start_date, end_date, peak_date)
-            flood_id = self.db_utils.insert_and_getId(sql, flood_data)
+            flood_event = (station_id, start_date, end_date, peak_date)
+            flood_id = self.db_utils.insert_and_getId(sql, flood_event)
             if flood_id:
                 flood_ids.append(flood_id)
 
