@@ -8,12 +8,14 @@ from applications.exception.my_exception import APIException
 
 bp = Blueprint('Feature', __name__, url_prefix='/Feature')
 
+
 def make_response(data=None, message="Success", code=200):
     return jsonify({
         "code": code,
         "message": message,
         "data": data
     }), code
+
 
 @bp.route("/calFlowFeature", methods=['POST'])
 def cal_flow_feature():
@@ -33,6 +35,7 @@ def cal_flow_feature():
     except Exception as e:
         return make_response(message="处理请求时出错: " + str(e), code=400)
 
+
 @bp.route("/calRainFeature", methods=['POST'])
 def cal_rain_feature():
     try:
@@ -50,3 +53,8 @@ def cal_rain_feature():
         return make_response(message=str(e), code=e.code)
     except Exception as e:
         return make_response(message="处理请求时出错: " + str(e), code=400)
+
+
+@bp.route("/", methods=['GET'])
+def test():
+    return "連接成功！"
