@@ -27,7 +27,7 @@ class SliceFlood():
         # SQL查询
         sql = f"""
         SELECT time, flow_value
-        FROM flow_data
+        FROM gen_flow_data
         WHERE station_id = '{self.stationId}'
         AND time BETWEEN '{self.startTime}' AND '{self.endTime}'
         ORDER BY time
@@ -37,21 +37,21 @@ class SliceFlood():
             data = self.db_utils.query(sql)
             data = pd.DataFrame(data)
             data.columns = ['Time', 'FlowValue']
-            print("数据库中获取的数据是：")
-            print(data)
+            # print("数据库中获取的数据是：")
+            # print(data)
             # 使用重采样函数
-            self.data = resample_time_series(data, index_column='Time', sample_rate='H', fill_method='spline', order=3)
-            print("resample_time_series后的数据")
-            print(self.data)
+            self.data = resample_time_series(data, index_column='Time', sample_rate='h', fill_method='spline', order=3)
+            # print("resample_time_series后的数据")
+            # print(self.data)
             # self.data = data
             # self.data['Time'] = pd.to_datetime(self.data['Time'])
         except Exception as e:
             raise APIException(msg="数据库连接异常!",code=HTTPStatusCodes.SERVICE_UNAVAILABLE)
 
-        flood_times_sql = "SELECT start_time, end_time, peak_time FROM flood_events WHERE station_id = %s"
+        flood_times_sql = "SELECT start_time, end_time, peak_time FROM gen_flood_events WHERE station_id = %s"
         flood_event = self.db_utils.query(flood_times_sql, (self.stationId,))
-        print("数据库中获取洪水事件的数据是：")
-        print(self.data)
+        # print("数据库中获取洪水事件的数据是：")
+        # print(self.data)
         if flood_event:
             for row in flood_event:
                 self.flood_times.append({
@@ -131,7 +131,7 @@ class SliceFlood():
             raise APIException(msg="划分场次出错，场次结果存在重叠",code=HTTPStatusCodes.FORBIDDEN)
 
         flood_ids = []
-        sql = "INSERT INTO flood_events (station_id, start_time, end_time, peak_time) VALUES (%s, %s, %s, %s)"
+        sql = "INSERT INTO gen_flood_events (station_id, start_time, end_time, peak_time) VALUES (%s, %s, %s, %s)"
         for key, value in self.slice_res.items():
             station_id = self.stationId
             start_date = value['start_date']

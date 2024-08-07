@@ -12,7 +12,7 @@ import logging
 class MdtwMatch():
     def __init__(self, floodId, weights):
         self.id = floodId
-        print("当前ID",self.id)
+        # print("当前ID",self.id)
         self.res_id = None
         self.res_3_id = None
         self.weights = weights
@@ -22,25 +22,25 @@ class MdtwMatch():
         # 查询流量特征是否存在
         flow_feature_sql = f"""
                                     SELECT *
-                                    FROM flood_flow_feature
+                                    FROM kb_flood_flow_feature
                                     WHERE flood_id = '{self.id}'
                         """
         flow_feature_data = conn.query(flow_feature_sql)
-        print("数据库中获取的数据是：")
-        print(flow_feature_data)
+        # print("数据库中获取的数据是：")
+        # print(flow_feature_data)
         # 查询降雨特征是否存在
         rain_feature_sql = f"""
                                             SELECT *
-                                            FROM flood_rain_feature
+                                            FROM kb_flood_rain_feature
                                             WHERE flood_id = '{self.id}'
                                 """
         rain_feature_data = conn.query(rain_feature_sql)
-        print("数据库中获取的数据是：")
-        print(rain_feature_data)
+        # print("数据库中获取的数据是：")
+        # print(rain_feature_data)
         if flow_feature_data is None or rain_feature_data is None:
             raise APIException(msg="请先进行特征提取再匹配！", code=HTTPStatusCodes.SERVICE_UNAVAILABLE)
 
-        all_ids_sql = "select flood_id from flood_time_data group by flood_id;"
+        all_ids_sql = "select flood_id from kb_flood_time_data group by flood_id;"
 
         sql = """
                 SELECT 
@@ -50,9 +50,9 @@ class MdtwMatch():
                     b.max_grid_rainfall, 
                     b.rain_sum 
                 FROM 
-                    flood_flow_feature a
+                    kb_flood_flow_feature a
                 INNER JOIN 
-                    flood_rain_feature b 
+                    kb_flood_rain_feature b 
                 ON 
                     a.flood_id = b.flood_id;
                 """
@@ -76,16 +76,16 @@ class MdtwMatch():
                 raise ValueError("No valid flood IDs found after processing.")
 
             data = conn.query(sql)
-            print("数据库中返回的data")
-            print(data)
+            # print("数据库中返回的data")
+            # print(data)
             logging.debug(f"Raw data query result: {data}")
             if not data:
                 logging.error("No data found in the database.")
                 raise ValueError("No data found in the database.")
 
             data = pd.DataFrame(data)
-            print("处理后的data")
-            print(data)
+            # print("处理后的data")
+            # print(data)
             data.columns = ['FLOOD_ID', 'PEAK_FLOOD', 'TOTAL_FLOOD', 'MAX_GRID_RAINFALL', 'RAIN_SUM']
             # 为每行创建独立的空列表
             # for col in ['TIME', 'RAINFALL_VALUE', 'RAIN_TREND', 'AREAL_RAIN', 'MAX_INDEX', 'RAIN_MAX', 'FLOW_VALUE']:
@@ -98,11 +98,11 @@ class MdtwMatch():
             data['GRID_RAIN_MAX'] = [[]] * data.shape[0]
             data['FLOW_VALUE'] = [[]] * data.shape[0]
 
-            print("ids", ids)
+            # print("ids", ids)
 
 
             for id in ids:
-                sql1 = f"select flood_id, time, rainfall_value, rain_trend, areal_rain, max_index, grid_rain_max, flow_value from flood_time_data where flood_id = {id} order by time;"
+                sql1 = f"select flood_id, time, rainfall_value, rain_trend, areal_rain, max_index, grid_rain_max, flow_value from kb_flood_time_data where flood_id = {id} order by time;"
                 time_data = conn.query(sql1)
                 if not time_data:
                     logging.warning(f"No time data found for flood ID {id}.")
@@ -130,8 +130,8 @@ class MdtwMatch():
             self.data = data[
                 ['FLOOD_ID', 'RAINFALL_VALUE', 'RAIN_TREND', 'AREAL_RAIN', 'MAX_INDEX', 'RAIN_SUM', 'GRID_RAIN_MAX',
                  'MAX_GRID_RAINFALL', 'FLOW_VALUE', 'PEAK_FLOOD', 'TOTAL_FLOOD']]
-            print("self.data:")
-            print(self.data)
+            # print("self.data:")
+            # print(self.data)
 
             logging.debug(f"self.data: {self.data}")
             self.data = self.data[self.data['RAIN_SUM'] != 0]
@@ -276,7 +276,7 @@ class MdtwMatch():
             "mergedRes": merged_res
         }
 
-        sql1 = "insert into match_res (results,match_time) values ('"+json.dumps(result, cls=NpEncoder)+"','"+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"');"
+        sql1 = "insert into srv_match_res (results,match_time) values ('"+json.dumps(result, cls=NpEncoder)+"','"+datetime.now().strftime("%Y-%m-%d %H:%M:%S")+"');"
         db = DBUtils()
         db.exec(sql1)
 

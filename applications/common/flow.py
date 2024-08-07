@@ -35,28 +35,23 @@ class Flow():
         # 数据库操作工具
         self.db_utils = DBUtils()
 
-        # 指定CSV文件的路径
-        # csv_file_path = 'D:\postgraduate\project\PatternLibrary\data\\flow_data.csv'
-        # self.data = pd.read_csv(csv_file_path, header=0, names=['Time', 'FlowValue'])
-        # print("csv文件里的数据是")
-        # print(self.data)
 
         # 查询洪水事件是否存在
         flood_event_sql = f"""
                     SELECT *
-                    FROM flood_events
+                    FROM gen_flood_events
                     WHERE flood_id = '{self.floodId}'
         """
         data = self.db_utils.query(flood_event_sql)
-        print("数据库中获取的数据是：")
-        print(data)
+        # print("数据库中获取的数据是：")
+        # print(data)
         if data is None:
             raise APIException(msg="洪水场次不存在！", code=HTTPStatusCodes.NOT_FOUND)
 
         # SQL查询
         sql = f"""
                 SELECT time, flow_value
-                FROM flow_data
+                FROM gen_flow_data
                 WHERE station_id = '{self.stationId}'
                 AND time BETWEEN '{self.startTime}' AND '{self.endTime}'
                 ORDER BY time
@@ -66,8 +61,8 @@ class Flow():
             data = self.db_utils.query(sql)
             data = pd.DataFrame(data)
             data.columns = ['Time', 'FlowValue']
-            print("数据库中获取的数据是：")
-            print(data)
+            # print("数据库中获取的数据是：")
+            # print(data)
             # self.data = data
             # 使用重采用函数
             self.data = resample_time_series(data, index_column='Time', sample_rate='h', fill_method='spline', order=3,
@@ -76,8 +71,8 @@ class Flow():
         except Exception as e:
             raise APIException(msg="数据库连接异常!", code=HTTPStatusCodes.SERVICE_UNAVAILABLE)
 
-        print("处理后的流量时序数据为：")
-        print(self.data)
+        # print("处理后的流量时序数据为：")
+        # print(self.data)
 
         # 将 'Time' 列转换为列表
         self.timeList = self.data['Time'].tolist()
@@ -162,15 +157,15 @@ class Flow():
             raise APIException(msg="特征值计算有误!", code=HTTPStatusCodes.UNPROCESSABLE_ENTITY)
         # 对flood_feature表的保存
         # 检查原本记录是否存在，如果存在则执行update，否则执行insert操作
-        exist_sql = "SELECT * FROM flood_flow_feature WHERE flood_id = %s"
+        exist_sql = "SELECT * FROM kb_flood_flow_feature WHERE flood_id = %s"
         existing_data = self.db_utils.query(exist_sql, (self.floodId,))
-        print("数据库中获取的数据是：")
-        print(existing_data)
+        # print("数据库中获取的数据是：")
+        # print(existing_data)
 
         if existing_data:  # 如果存在记录，则执行更新操作
             print("执行的是更新操作")
             sql = """
-                      UPDATE flood_flow_feature
+                      UPDATE kb_flood_flow_feature
                       SET peak_pattern = %s,
                           peak_time = %s,
                           peak_flow = %s,
@@ -179,7 +174,8 @@ class Flow():
                           time_to_peak = %s,
                           dur_time = %s,
                           flood_flow_sequence = %s,
-                          total_flow = %s
+                          total_flow = %s,
+                          end_last_time = %s
                       WHERE flood_id = %s
                       """
             update_data = (
@@ -192,10 +188,11 @@ class Flow():
                 self.durationFlood,
                 json.dumps(self.flowList) if self.flowList else None,
                 self.totalFlood,
+                self.endLastTime,
                 self.floodId
             )
             save_time_data_sql = '''
-                        UPDATE flood_time_data 
+                        UPDATE kb_flood_time_data 
                         SET time = %s,
                             flow_value = %s
                         WHERE flood_id = %s
@@ -208,10 +205,10 @@ class Flow():
         else:  # 如果不存在记录，则执行插入操作
             print("执行的是插入操作")
             sql = """
-                          INSERT INTO flood_flow_feature 
+                          INSERT INTO kb_flood_flow_feature 
                           (flood_id, peak_pattern, peak_time, peak_flow, start_time, end_time, 
-                           time_to_peak, dur_time, flood_flow_sequence, total_flow)
-                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                           time_to_peak, dur_time, flood_flow_sequence, total_flow, end_last_time)
+                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                           """
 
             insert_data = (
@@ -224,12 +221,13 @@ class Flow():
                 self.startLastTime,
                 self.durationFlood,
                 json.dumps(self.flowList) if self.flowList else None,
-                self.totalFlood
+                self.totalFlood,
+                self.endLastTime
             )
             feature_id = self.db_utils.exec(sql, insert_data)
 
             save_time_data_sql = '''
-                                    INSERT INTO flood_time_data (flood_id, time, flow_value)
+                                    INSERT INTO kb_flood_time_data (flood_id, time, flow_value)
                                     VALUES (%s, %s, %s)
                                 '''
             if self.resultState['FLOW_FLOOD_STATE'] == 1:

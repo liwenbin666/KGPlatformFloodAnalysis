@@ -21,9 +21,9 @@ class Rain():
         self.stationId = stationId
         self.startTime = startTime
         self.endTime = endTime
-        print("开始时间")
+        # print("开始时间")
         print(self.startTime)
-        print("结束时间")
+        # print("结束时间")
         print(self.endTime)
 
         # 数据库操作工具
@@ -59,23 +59,23 @@ class Rain():
         # 查询洪水事件是否存在
         flood_event_sql = f"""
                             SELECT *
-                            FROM flood_events
+                            FROM gen_flood_events
                             WHERE flood_id = '{self.floodId}'
                 """
         data = self.db_utils.query(flood_event_sql)
-        print("数据库中获取的数据是：")
-        print(data)
+        # print("数据库中获取的数据是：")
+        # print(data)
         if data is None:
             raise APIException(msg="洪水场次不存在！", code=HTTPStatusCodes.NOT_FOUND)
         # 查询洪水事件是否存在
         flow_feature_sql = f"""
                             SELECT *
-                            FROM flood_flow_feature
+                            FROM kb_flood_flow_feature
                             WHERE flood_id = '{self.floodId}'
                         """
         data = self.db_utils.query(flow_feature_sql)
-        print("数据库中获取的流量特征值数据是：")
-        print(data)
+        # print("数据库中获取的流量特征值数据是：")
+        # print(data)
         if data is None:
             raise APIException(msg="计算雨量特征值之前必须先计算流量特征值！", code=HTTPStatusCodes.FORBIDDEN)
 
@@ -83,7 +83,7 @@ class Rain():
         # 在station表中读取所在流域id
         basin_sql = f"""
                 SELECT basin_id
-                FROM station
+                FROM gen_station
                 WHERE station_id >= %s
                 AND station_type = 0
                 """
@@ -91,10 +91,10 @@ class Rain():
         # 在station和rain_data表里读取该洪水发生所在流域的雨量数据
         rainData_sql = f"""
                         SELECT time, station_id, rain_value
-                        FROM rain_data
+                        FROM gen_rain_data
                         WHERE station_id IN (
                             SELECT station_id
-                            FROM station
+                            FROM gen_station
                             WHERE basin_id = %s
                             AND station_type = 1
                         ) AND time >= %s AND time <= %s
@@ -104,7 +104,7 @@ class Rain():
         # 在basin表读取流域的经纬度范围
         lon_lat_sql = f"""
                 SELECT longitude_range, latitude_range
-                FROM basin
+                FROM gen_basin
                 where basin_id = %s
                 """
 
@@ -120,16 +120,16 @@ class Rain():
                 # 提取元组中的第一个元素作为流域id
                 # self.basinId = self.data[0][0]
                 self.basinId = self.data[0]['basin_id']
-                print("流域ID")
-                print(self.basinId)
+                # print("流域ID")
+                # print(self.basinId)
             except Exception as e:
                 print("查询数据时出错: ", e)
             # print(self.basinId)
             ##########################
 
             self.data = self.db_utils.query(rainData_sql, (self.basinId, self.startTime, self.endTime))
-            print("数据查出的self.data")
-            print(self.data)
+            # print("数据查出的self.data")
+            # print(self.data)
 
             # # 将数据转换为 DataFrame
             # data_frame = pd.DataFrame(self.data)
@@ -162,8 +162,8 @@ class Rain():
             # print("重采样后的数据:")
             # print(self.data)
             self.data_frame = pd.DataFrame(self.data)
-            print("self.data_frame")
-            print(self.data_frame)
+            # print("self.data_frame")
+            # print(self.data_frame)
             try:
                 if not self.data_frame.empty:
                     self.data_frame['time'] = pd.to_datetime(self.data_frame['time'])
@@ -172,14 +172,14 @@ class Rain():
             except Exception as e:
                 print("加载数据时出错: ", e)
             self.data_frame['station_id'] = self.data_frame['station_id'].astype('int64')
-            print("处理后的self.data_frame")
+            # print("处理后的self.data_frame")
             pd.set_option('display.max_rows', None)  # 显示所有行
             pd.set_option('display.max_columns', None)  # 显示所有列
             pd.set_option('display.width', 1000)  # 增加每行的显示宽度，防止换行
-            print(self.data_frame)
+            # print(self.data_frame)
             self.new_data = self.data_frame.to_dict(orient='records')
-            print("self.new_data")
-            print(self.new_data)
+            # print("self.new_data")
+            # print(self.new_data)
             # if not data_frame.empty:
             #     grouped = data_frame.groupby('station_id')
             #     for station_id, group in grouped:
@@ -242,8 +242,8 @@ class Rain():
                 station_index = station_id_to_index[row['station_id']]
                 self.rainData[time_index][station_index] = row['rain_value']
 
-            print("填充后的雨量数据是:")
-            print(self.rainData)
+            # print("填充后的雨量数据是:")
+            # print(self.rainData)
 
 
             # 每小时各个测站的平均值作为改时间雨量列表中的值
@@ -256,7 +256,7 @@ class Rain():
 
             ## 获取流域的经纬度范围
             self.data = self.db_utils.query(lon_lat_sql, self.basinId)
-            print("经纬度范围是:")
+            # print("经纬度范围是:")
             # print(self.data)
             strLONGITUDE_RANGE = self.data[0]['longitude_range']
 
@@ -396,7 +396,7 @@ class Rain():
         # 从station表里读取洪水所在流域的雨量站信息
         station_sql = '''
             SELECT station_id, longitude, latitude
-            FROM station 
+            FROM gen_station 
             WHERE basin_id = %s
             AND station_type = 1
         '''
@@ -405,13 +405,13 @@ class Rain():
         df = pd.DataFrame(columns=['区站号', '东经', '北纬'])
         try:
             self.data = self.db_utils.query(station_sql, self.basinId)
-            print("原始测站信息查询结果：", self.data)  # 调试信息
+            # print("原始测站信息查询结果：", self.data)  # 调试信息
 
             # 用查询结果填充 DataFrame
             if self.data:
                 data = [{"区站号": row['station_id'], "东经": row['longitude'], "北纬": row['latitude']} for row in self.data]
                 df = pd.DataFrame(data)
-                print("生成的测站DataFrame：\n", df)  # 调试信息
+                # print("生成的测站DataFrame：\n", df)  # 调试信息
 
 
             # 关闭数据库连接
@@ -423,7 +423,7 @@ class Rain():
         # 输出结果到文件
         result_filename = os.path.join(self.dataPrePath, 'static/datas/areadata/ObsID.txt')
         df.to_csv(result_filename, sep=',', index=False)
-        print(f"结果写入文件：{result_filename}")  # 调试信息
+        # print(f"结果写入文件：{result_filename}")  # 调试信息
 
     def get_Precipitation(self):
         # 获取现有雨量站雨量信息
@@ -604,10 +604,10 @@ class Rain():
     def save_Rain_Feature(self):
         try:
             # 检查原本记录是否存在，如果存在则执行update，否则执行insert操作
-            exist_sql = "SELECT * FROM flood_rain_feature WHERE flood_id = %s"
+            exist_sql = "SELECT * FROM kb_flood_rain_feature WHERE flood_id = %s"
             existing_data = self.db_utils.query(exist_sql, (self.floodId,))
-            print("数据库中获取的数据是：")
-            print(existing_data)
+            # print("数据库中获取的数据是：")
+            # print(existing_data)
             print("特征值保存中")
             # 对rain_feature表的保存
             # save_rain_feature_sql = '''
@@ -621,7 +621,7 @@ class Rain():
             if existing_data:  # 如果存在记录，则执行更新操作
                 print("执行的是更新操作")
                 update_rain_feature_sql = '''
-                            UPDATE flood_rain_feature
+                            UPDATE kb_flood_rain_feature
                             SET 
                                 rain_sum = %s,
                                 rainfall_state = %s,
@@ -652,7 +652,7 @@ class Rain():
             else:  # 如果不存在记录，则执行插入操作
                 print("执行的是插入操作")
                 insert_rain_feature_sql = '''
-                            INSERT INTO flood_rain_feature (
+                            INSERT INTO kb_flood_rain_feature (
                                 flood_id, rain_sum, rainfall_state,
                                 rain_max_state, rain_trend_state,
                                 areal_rain_state, rain_center_state, rain_center_side_state,
@@ -676,7 +676,7 @@ class Rain():
 
             # 对flood_time_data表的更新
             update_time_data_sql = '''
-            UPDATE flood_time_data
+            UPDATE kb_flood_time_data
             SET 
                 rainfall_value = %s,
                 grid_rain_max = %s,

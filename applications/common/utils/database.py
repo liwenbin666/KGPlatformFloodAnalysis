@@ -6,10 +6,16 @@ from flask import current_app
 class DBUtils:
     def __init__(self):
 
-        self.db_host = 'localhost'
+        # self.db_host = 'localhost'
+        # self.db_port = 3306
+        # self.db_username = 'root'
+        # self.db_password = '111111'
+        # self.db_name = 'flood_analysis'
+
+        self.db_host = '10.196.83.122'
         self.db_port = 3306
         self.db_username = 'root'
-        self.db_password = '111111'
+        self.db_password = 'bamboo1216'
         self.db_name = 'flood_analysis'
 
         try:
